@@ -228,14 +228,6 @@
     checked={$settings.always_on_top}
     onclick={() => toggle('always_on_top', $settings.always_on_top)}
   />
-  {#if $settings.always_on_top}
-    <SettingsToggle
-      label={m.system_toggle_break_aot()}
-      description={m.system_toggle_break_aot_desc()}
-      checked={$settings.break_always_on_top}
-      onclick={() => toggle('break_always_on_top', $settings.break_always_on_top)}
-    />
-  {/if}
 
   <div class="group-heading">{m.system_group_data()}</div>
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { timerToggle, timerRestartRound, timerSkip } from '$lib/ipc';
+  import { timerToggle, timerRestartRound, timerStopAlert } from '$lib/ipc';
   import { timerState } from '$lib/stores/timer';
 
   let state = $derived($timerState);
@@ -15,31 +15,33 @@
     </svg>
   </button>
 
-  <!-- Play / Pause -->
-  <button class="play-pause" onclick={timerToggle} aria-label={state.is_running ? 'Pause' : 'Play'}>
-    {#key state.is_running}
-      <span class="icon" in:fade={{ duration: 100 }}>
-        {#if state.is_running}
-          <svg width="12" height="12" viewBox="0 0 24 24">
-            <rect x="4" y="3" width="5" height="18" rx="1.5" fill="currentColor" />
-            <rect x="15" y="3" width="5" height="18" rx="1.5" fill="currentColor" />
-          </svg>
-        {:else}
-          <svg width="12" height="12" viewBox="0 0 24 24">
-            <polygon points="5,3 21,12 5,21" fill="currentColor" />
-          </svg>
-        {/if}
-      </span>
-    {/key}
-  </button>
-
-  <!-- Skip round -->
-  <button class="btn-side" onclick={timerSkip} aria-label="Skip round">
-    <svg width="10" height="10" viewBox="0 0 16 16">
-      <polygon points="1,1 10,8 1,15" fill="currentColor" />
-      <rect x="12" y="1" width="3" height="14" rx="1" fill="currentColor" />
-    </svg>
-  </button>
+  {#if state.is_alerting}
+    <!-- Stop Alert -->
+    <button class="play-pause" onclick={timerStopAlert} aria-label="Stop Alert" style="border-color: #ff4d4f; color: #ff4d4f;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </button>
+  {:else}
+    <!-- Play / Pause -->
+    <button class="play-pause" onclick={timerToggle} aria-label={state.is_running ? 'Pause' : 'Play'}>
+      {#key state.is_running}
+        <span class="icon" in:fade={{ duration: 100 }}>
+          {#if state.is_running}
+            <svg width="12" height="12" viewBox="0 0 24 24">
+              <rect x="4" y="3" width="5" height="18" rx="1.5" fill="currentColor" />
+              <rect x="15" y="3" width="5" height="18" rx="1.5" fill="currentColor" />
+            </svg>
+          {:else}
+            <svg width="12" height="12" viewBox="0 0 24 24">
+              <polygon points="5,3 21,12 5,21" fill="currentColor" />
+            </svg>
+          {/if}
+        </span>
+      {/key}
+    </button>
+  {/if}
 </div>
 
 <style>

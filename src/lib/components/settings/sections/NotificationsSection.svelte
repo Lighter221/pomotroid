@@ -18,8 +18,6 @@
 
   const CUE_LIST: { id: CueKey; label: () => string }[] = [
     { id: 'work_alert', label: m.notif_alert_work },
-    { id: 'short_break_alert', label: m.notif_alert_short_break },
-    { id: 'long_break_alert', label: m.notif_alert_long_break },
   ];
 
   let localVolume = $state($settings.volume);
@@ -163,12 +161,6 @@
     description={m.notif_toggle_tick_work_desc()}
     checked={$settings.tick_sounds_during_work}
     onclick={() => toggle('tick_sounds_work', $settings.tick_sounds_during_work)}
-  />
-  <SettingsToggle
-    label={m.notif_toggle_tick_break()}
-    description={m.notif_toggle_tick_break_desc()}
-    checked={$settings.tick_sounds_during_break}
-    onclick={() => toggle('tick_sounds_break', $settings.tick_sounds_during_break)}
   />
 
   <div class="group-heading">{m.notif_group_volume()}</div>

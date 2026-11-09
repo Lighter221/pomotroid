@@ -29,6 +29,12 @@ pub fn timer_toggle(timer: State<'_, TimerController>) {
 }
 
 /// Reset the current round's timer without advancing the sequence.
+/// Stop alerting/ringing when work duration completes.
+#[tauri::command]
+pub fn timer_stop_alert(timer: State<'_, TimerController>) {
+    timer.stop_alert();
+}
+
 #[tauri::command]
 pub fn timer_reset(timer: State<'_, TimerController>) {
     timer.reset();

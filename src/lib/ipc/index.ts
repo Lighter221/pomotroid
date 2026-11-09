@@ -17,6 +17,7 @@ import type {
 // --- Timer commands ---
 
 export const timerToggle = () => invoke<void>('timer_toggle');
+export const timerStopAlert = () => invoke<void>('timer_stop_alert');
 export const timerReset = () => invoke<void>('timer_reset');
 export const timerRestartRound = () => invoke<void>('timer_restart_round');
 export const timerSkip = () => invoke<void>('timer_skip');

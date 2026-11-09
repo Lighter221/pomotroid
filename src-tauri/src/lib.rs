@@ -369,6 +369,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Timer
             timer_toggle,
+            timer_stop_alert,
             timer_reset,
             timer_restart_round,
             timer_skip,

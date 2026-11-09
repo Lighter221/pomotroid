@@ -1,6 +1,7 @@
 pub mod engine;
 pub mod sequence;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,6 +39,7 @@ pub struct TimerSnapshot {
     /// Monotonically-increasing focus round count since last reset. Used as a
     /// session counter when long breaks are disabled.
     pub session_work_count: u32,
+    pub is_alerting: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ pub struct TimerController {
     sequence: Arc<Mutex<SequenceState>>,
     settings: Arc<Mutex<Settings>>,
     shared: Arc<Mutex<TimerShared>>,
+    is_alerting: Arc<AtomicBool>,
     /// Kept alive so TrayState is not dropped if lib.rs forgets its copy.
     #[allow(dead_code)]
     tray: Arc<TrayState>,
@@ -83,6 +86,7 @@ impl TimerController {
             elapsed_secs: 0,
             is_running: false,
         }));
+        let is_alerting = Arc::new(AtomicBool::new(false));
 
         // Clone handles for the event-listener thread.
         let seq_thread = Arc::clone(&sequence);
@@ -90,6 +94,7 @@ impl TimerController {
         let shared_thread = Arc::clone(&shared);
         let engine_thread = engine.clone();
         let tray_thread = Arc::clone(&tray);
+        let is_alerting_thread = Arc::clone(&is_alerting);
 
         std::thread::Builder::new()
             .name("timer-events".to_string())
@@ -104,6 +109,7 @@ impl TimerController {
                         engine: engine_thread,
                         tray: tray_thread,
                         db,
+                        is_alerting: is_alerting_thread,
                     },
                 );
             })
@@ -114,14 +120,25 @@ impl TimerController {
             sequence,
             settings: settings_arc,
             shared,
+            is_alerting,
             tray,
         }
     }
 
     // --- Commands ---
 
+    pub fn stop_alert(&self) {
+        log::info!("[timer] stop alert");
+        self.is_alerting.store(false, Ordering::SeqCst);
+        self.reset();
+    }
+
     /// Toggle: start a fresh timer if idle, resume if paused, pause if running.
     pub fn toggle(&self) {
+        if self.is_alerting.load(Ordering::SeqCst) {
+            self.stop_alert();
+            return;
+        }
         let s = self.shared.lock().unwrap();
         if s.is_running {
             log::info!("[timer] pause");
@@ -137,6 +154,7 @@ impl TimerController {
 
     pub fn reset(&self) {
         log::info!("[timer] reset");
+        self.is_alerting.store(false, Ordering::SeqCst);
         self.sequence.lock().unwrap().reset();
         // Send only Reset — the event listener's Reset handler will follow up
         // with Prime once the engine is confirmed Idle. Sending a duration
@@ -149,6 +167,7 @@ impl TimerController {
     /// preserved — only the elapsed time is zeroed.
     pub fn restart_round(&self) {
         log::info!("[timer] restart round");
+        self.is_alerting.store(false, Ordering::SeqCst);
         self.engine.send(TimerCommand::Reset);
     }
 
@@ -193,6 +212,7 @@ impl TimerController {
             work_round_number: seq.work_round_number,
             work_rounds_total: seq.work_rounds_total,
             session_work_count: seq.session_work_count,
+            is_alerting: self.is_alerting.load(Ordering::SeqCst),
         }
     }
 
@@ -229,6 +249,7 @@ struct ListenContext {
     engine: EngineHandle,
     tray: Arc<TrayState>,
     db: DbState,
+    is_alerting: Arc<AtomicBool>,
 }
 
 fn listen_events(
@@ -236,7 +257,7 @@ fn listen_events(
     event_rx: std::sync::mpsc::Receiver<TimerEvent>,
     ctx: ListenContext,
 ) {
-    let ListenContext { sequence, settings, shared, engine, tray, db } = ctx;
+    let ListenContext { sequence, settings, shared, engine, tray, db, is_alerting } = ctx;
     // Track last tray progress to throttle redraws to ≥ 1% delta.
     let mut last_tray_progress: f32 = -1.0;
     // Active session row ID for recording (None = not started yet).
@@ -314,12 +335,12 @@ fn listen_events(
                     }
                 }
 
-                // Advance sequence.
-                let (next_round, next_duration, auto_start_work, auto_start_break) = {
+                // Advance sequence (always Work).
+                let (_next_round, next_duration) = {
                     let mut seq = sequence.lock().unwrap();
                     let s = settings.lock().unwrap();
                     let (rt, dur) = seq.advance(&s);
-                    (rt, dur, s.auto_start_work, s.auto_start_break)
+                    (rt, dur)
                 };
 
                 // Reset shared state for the new round.
@@ -329,73 +350,54 @@ fn listen_events(
                     s.is_running = false;
                 }
 
-                // Arm the next round's duration without risking a late
-                // reconfigure that kicks a freshly-started timer back to Idle.
+                // Arm the next round's duration.
                 engine.send(TimerCommand::Prime {
                     duration_secs: next_duration,
                 });
 
-                // Emit round-change with the new snapshot.
-                let snapshot = build_snapshot(&sequence, &settings, &shared);
-                let _ = app.emit("timer:round-change", snapshot);
+                // Start continuous alarm loop until cancelled
+                if !was_skipped {
+                    is_alerting.store(true, Ordering::SeqCst);
+                    let alert_flag = Arc::clone(&is_alerting);
+                    let audio_opt = app.try_state::<Arc<AudioManager>>();
+                    std::thread::spawn(move || {
+                        while alert_flag.load(Ordering::SeqCst) {
+                            if let Some(ref audio) = audio_opt {
+                                audio.play_cue(AudioCue::WorkAlert);
+                            }
+                            for _ in 0..25 {
+                                if !alert_flag.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_millis(100));
+                            }
+                        }
+                    });
 
-                // Desktop notifications are dispatched by the frontend via the
-                // notification_show command after receiving the timer:round-change
-                // event, so translated strings can be used.
-
-                // Audio alert for the new round.
-                if let Some(audio) = app.try_state::<Arc<AudioManager>>() {
-                    let cue = match next_round {
-                        RoundType::Work => AudioCue::WorkAlert,
-                        RoundType::ShortBreak => AudioCue::ShortBreakAlert,
-                        RoundType::LongBreak => AudioCue::LongBreakAlert,
-                    };
-                    audio.play_cue(cue);
-                }
-
-                // Lower-priority-during-breaks: when always_on_top is on and
-                // break_always_on_top is enabled, disable always-on-top for
-                // breaks and restore it when work resumes.
-                let (always_on_top, break_always_on_top) = {
-                    let s = settings.lock().unwrap();
-                    (s.always_on_top, s.break_always_on_top)
-                };
-                if always_on_top {
+                    // Ensure window is shown and focused so the user can easily cancel
                     if let Some(window) = app.get_webview_window("main") {
-                        let is_break = next_round != RoundType::Work;
-                        let _ = window.set_always_on_top(!(break_always_on_top && is_break));
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
                     }
                 }
 
+                // Emit round-change with the new snapshot.
+                let snapshot = build_snapshot(&sequence, &settings, &shared, &is_alerting);
+                let _ = app.emit("timer:round-change", snapshot);
+
                 // Update tray to reflect new round type and reset progress.
-                // Use -1.0 (same as initialisation and Reset) so the very
-                // first tick of the new round always passes the ≥1% threshold,
-                // regardless of how long the round is.  Using 0.0 here caused
-                // a ≥15-second blank period before the arc started animating.
                 let rt = sequence.lock().unwrap().current_round.as_str().to_string();
                 tray::update_icon(&tray, &rt, false, 0.0);
                 last_tray_progress = -1.0;
 
                 // Broadcast round-change to any connected WebSocket clients.
                 if let Some(ws) = app.try_state::<Arc<WsState>>() {
-                    let snap = build_snapshot(&sequence, &settings, &shared);
+                    let snap = build_snapshot(&sequence, &settings, &shared, &is_alerting);
                     websocket::broadcast_round_change(&ws, snap);
                 }
 
-                // Auto-start if configured.
-                let should_auto = match next_round {
-                    RoundType::Work => auto_start_work,
-                    _ => auto_start_break,
-                };
-                if should_auto {
-                    log::debug!("[timer] auto-starting {}", next_round.as_str());
-                    engine.send(TimerCommand::Start);
-                } else {
-                    // Timer is idle waiting for the user to start the new round.
-                    // Reset the tray menu to "Start" so it doesn't keep showing
-                    // "Pause" from the round that just completed.
-                    tray::update_menu_items(&tray, false, false);
-                }
+                tray::update_menu_items(&tray, false, false);
             }
 
             TimerEvent::Paused { elapsed_secs } => {
@@ -441,6 +443,7 @@ fn listen_events(
 
             TimerEvent::Reset => {
                 log::debug!("[timer] idle");
+                is_alerting.store(false, Ordering::SeqCst);
                 // Abandon the active session (leave DB row as-is).
                 current_session_id = None;
 
@@ -449,7 +452,7 @@ fn listen_events(
                     s.elapsed_secs = 0;
                     s.is_running = false;
                 }
-                let snapshot = build_snapshot(&sequence, &settings, &shared);
+                let snapshot = build_snapshot(&sequence, &settings, &shared, &is_alerting);
                 let _ = app.emit("timer:reset", snapshot);
                 if let Some(ws) = app.try_state::<Arc<WsState>>() {
                     websocket::broadcast_reset(&ws);
@@ -500,6 +503,7 @@ fn build_snapshot(
     sequence: &Arc<Mutex<SequenceState>>,
     settings: &Arc<Mutex<Settings>>,
     shared: &Arc<Mutex<TimerShared>>,
+    is_alerting: &Arc<AtomicBool>,
 ) -> TimerSnapshot {
     let seq = sequence.lock().unwrap();
     let s = settings.lock().unwrap();
@@ -515,5 +519,6 @@ fn build_snapshot(
         work_round_number: seq.work_round_number,
         work_rounds_total: seq.work_rounds_total,
         session_work_count: seq.session_work_count,
+        is_alerting: is_alerting.load(Ordering::SeqCst),
     }
 }

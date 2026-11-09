@@ -44,18 +44,10 @@
   }
 </script>
 
-<!-- Round counter: X/Y when long breaks are active; labelled session count otherwise -->
-<Tooltip
-  text={$settings.long_breaks_enabled
-    ? m.tooltip_round_counter()
-    : m.tooltip_round_counter_session()}
->
+<!-- Round counter: labelled session count -->
+<Tooltip text={m.tooltip_round_counter_session()}>
   <span class="rounds">
-    {#if $settings.long_breaks_enabled}
-      {snap.work_round_number} &nbsp;|&nbsp; {snap.work_rounds_total}
-    {:else}
-      {m.timer_session_round({ n: snap.session_work_count })}
-    {/if}
+    {m.timer_session_round({ n: snap.session_work_count })}
   </span>
 </Tooltip>
 
