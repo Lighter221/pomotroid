@@ -1,73 +1,76 @@
-name: Package Windows App
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  build-windows:
-    name: Build Windows x64 Installer
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Compile paraglide i18n
-        run: npm run paraglide:compile
-
-      - name: Sync SvelteKit types
-        run: npx svelte-kit sync
-
-      - name: Build Windows App (NSIS installer)
-        run: npm run tauri build -- --bundles nsis
-        env:
-          CI: true
-
-      - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pomotroid-Windows-x64
-          path: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/pomotroid.exe
-          if-no-files-found: error
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        with:
-          tag_name: custom-v1.0.0
-          name: "自定义番茄钟 v1.0.0 (单工作模式+超时提醒)"
-          body: |
-            ### 自定义功能：
-            - 去除短休息与长休息，仅保留工作时长。
-            - 工作时长到达后持续循环提醒，直到手动点击取消。
-          files: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/pomotroid.exe
-          draft: false
-          prerelease: false
+name: Package Windows App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Compile paraglide i18n
+        run: npm run paraglide:compile
+
+      - name: Sync SvelteKit types
+        run: npx svelte-kit sync
+
+      - name: Build Windows App (NSIS installer)
+        run: npm run tauri build -- --bundles nsis
+        env:
+          CI: true
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pomotroid-Windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/pomotroid.exe
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: custom-v1.0.0
+          name: "自定义番茄钟 v1.0.0 (单工作模式+超时提醒)"
+          body: |
+            ### 自定义功能：
+            - 去除短休息与长休息，仅保留工作时长。
+            - 工作时长到达后持续循环提醒，直到手动点击取消。
+          files: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/pomotroid.exe
+          draft: false
+          prerelease: false

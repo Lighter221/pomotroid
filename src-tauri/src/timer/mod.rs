@@ -359,7 +359,7 @@ fn listen_events(
                 if !was_skipped {
                     is_alerting.store(true, Ordering::SeqCst);
                     let alert_flag = Arc::clone(&is_alerting);
-                    let audio_opt = app.try_state::<Arc<AudioManager>>();
+                    let audio_opt = app.try_state::<Arc<AudioManager>>().map(|state| Arc::clone(&*state));
                     std::thread::spawn(move || {
                         while alert_flag.load(Ordering::SeqCst) {
                             if let Some(ref audio) = audio_opt {
